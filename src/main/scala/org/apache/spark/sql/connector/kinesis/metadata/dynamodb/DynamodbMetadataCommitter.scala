@@ -38,6 +38,8 @@ import org.json4s.jackson.Serialization
 import software.amazon.awssdk.core.SdkBytes
 import software.amazon.awssdk.core.util.DefaultSdkAutoConstructList
 import software.amazon.awssdk.regions.Region
+import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider
+import org.apache.spark.sql.connector.kinesis.ConnectorAwsCredentialsProvider
 import software.amazon.awssdk.services.dynamodb.DynamoDbAsyncClient
 import software.amazon.awssdk.services.dynamodb.model.AttributeDefinition
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue
@@ -96,9 +98,33 @@ class DynamodbMetadataCommitter[T <: AnyRef : ClassTag](
   var newTableCreated = false // only set to true if created a new table. Reuse existing is false
   private val tags: util.Collection[Tag] = DefaultSdkAutoConstructList.getInstance[Tag]
 
+  private val kinesisRegion = options.kinesisRegion
+
+  private val connectorAwsCredentialsProvider = {
+    val builder = ConnectorAwsCredentialsProvider.builder
+
+    if (options.stsRoleArn.isDefined) {
+      builder.stsCredentials(
+        options.stsRoleArn,
+        options.stsSessionName,
+        kinesisRegion,
+        options.stsEndpointUrl
+      )
+    } else if (options.awsAccessKeyId.isDefined) {
+      builder.staticCredentials(
+        options.awsAccessKeyId,
+        options.awsSecretKey,
+        options.sessionToken
+      )
+    }
+    builder.build()
+  }
+
+  private val credentialsProvider: AwsCredentialsProvider = connectorAwsCredentialsProvider.provider
+
   private val dynamoDBClient = client.getOrElse(
     DynamoDbAsyncClient.builder
-    .credentialsProvider(ConnectorDefaultCredentialsProvider().provider)
+    .credentialsProvider(credentialsProvider)
     .region(Region.of(options.region))
     .build
   )
